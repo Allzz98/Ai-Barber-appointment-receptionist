@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "barber-shop-ai-booking-system",
+  "private_key_id": "1daece25cca271e6a3848ec7d547f94e6abb6505",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQCQFQyXypnVCTNQ\n+o+qeExj9O7Hwc4LEtPsF4NVmNma0mfWO4WQtyQPkhrEENAgdk/2Rqlb3hxNUygw\neZO9TUY9sN/0qcTPDSJxw7p8yZ203PMRYT+wunwl1Q7Q+Um9frOccJRwtCuvt9It\ntfeR/lKYkMLSbYvUkrIMjcXL10QbT8u73ujhB3dcT9IA/4JFS0YleQreNYlwY+mr\nsEPuQFpMic02Z/+6gsrpST/uzZq1UlJbCl7hl9giOoOPKSqp4MP4Em85zT1KYIBK\nEO37FtOHCHF4LaOPLPj6YDdIhSeOdO6VigULwTP5/mTYajKhJsUZx5xmV+H7kaK3\n1PFbrg9LAgMBAAECggEAPlUk6AxJ5ey/iyKDAcRehAXkQX46RfckwKhhdKgWSBEL\nxBZnD7bzflr+gmElsU2OBWUHgsuB4f/+TI5kWIq0Px8knGPP1aWAh8geBztwI11N\nOPEiDTJ4YCOe79BRUw4b5SudRG7l0XTMlGL7Umk80W0bI88ppdK6/YxeDHQ6Ljf+\nbMcTrlnVER03xe3EAawOsonI8ntWHjAKUnIiWY+8IpQAYk+AYwVaDxv0aYnORHLD\nnnY8j2C1luWr74N4cg8orx/EAa8Yk3GMfC0k9nhXOh78pjrVR8bZPUoUCNO9baT6\n9Xx0m6NzYi0aJ2fJviwIA3pC1TzQ9BzEQOk8G5Xm2QKBgQDKU8dL6QnP3ec6jQKV\nWbA0aXz65j9Z0Ga/xPcOfIx0ASHTMA/PdmqpFwRCqx6+O2dwYejQQ2AX1/HWCFYH\n7iw8+CCCZ5yCM2rLuPsdh9MWScEAqvgxxfoBc6mWUCkj16DggyiHvfqPqY15Q5SM\n3VOyr6fjF9PSzCUkVzQZcHDt2QKBgQC2Tcyag2/92XKAjcHGnnykYF/paVx1bxOO\nVBlSYFyFuqYlwBSUqnOUOLSaeLtotxunO1RyBYXU0SsmPsXPGHmAWORZOK4CKHY0\ncMg5pxyp4+I4lFRejYKveNnJF5o6UbhoG0xD+N6VIWh/XvwqKQaRdtIsg73XAZy7\nuYL/TksbwwKBgDSaaZN76DgqGmcnqEdKRTyrPHpDCK+CNmSfghg7G41BihjNQx8O\nS5bgzBPFR73v1enrGsui6MXqOA8Mpcl0C/5iCJm+9HsJgTesRWWdHa2KyWoyCUtv\njJt6Bdp1xuxxsHsOvqfkJdPaIlUn0+R32r33W2/4jvMcbn+vSHVgvYupAoGAD3jG\n1o41IPwlZZeiTHMC7Qho22xftm+43ylwBLe84nSWyTlmBb/5kyjE2x9H+Hkh1a2J\nWyvw0cD2woYtT4gqN6RTrObMjc5VSdoQhCQUoK6AcoDUMDoeTzoYcaKZKj3pQpye\nel5StaFiNv0etY1Jy2qkJ7b+k5LFdIEoBvbkFPUCgYBchNg+ovC/8FpLXu3qYh6A\nlMGgDH39fRqqNS/mpWPmjhLzPLPRW16Nqa6Do/xG4E12w6/0ZGRHMJritXLlwysT\n1DR+KLHLmZOWiENlUeDlZzPVR6rK5MX+IWDcIWjC0y0+Lqu/+xWjNrYw2NizPYb8\nq6OEXIdyY3edEuiNMWz9yQ==\n-----END PRIVATE KEY-----\n",
+  "client_email": "barber-booking-agent@barber-shop-ai-booking-system.iam.gserviceaccount.com",
+  "client_id": "116825409240482631595",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/barber-booking-agent%40barber-shop-ai-booking-system.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}
