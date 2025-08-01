@@ -18,7 +18,7 @@ SERVICE_ACCOUNT_FILE = "service_account.json"
 
 openai.api_key = OPENAI_API_KEY
 
-# Check if requested time is available on Google Calendar
+# Check calendar availability
 def check_availability(requested_datetime):
     credentials = service_account.Credentials.from_service_account_file(
         SERVICE_ACCOUNT_FILE,
@@ -38,9 +38,9 @@ def check_availability(requested_datetime):
     ).execute()
 
     events = events_result.get("items", [])
-    return len(events) == 0  # True if no events found
+    return len(events) == 0
 
-# Create a booking on Google Calendar
+# Create a booking
 def create_booking(name, description, start_time):
     credentials = service_account.Credentials.from_service_account_file(
         SERVICE_ACCOUNT_FILE,
@@ -58,28 +58,47 @@ def create_booking(name, description, start_time):
     created_event = service.events().insert(calendarId=GOOGLE_CALENDAR_ID, body=event).execute()
     return created_event.get("htmlLink")
 
-# Convert text to MP3 using ElevenLabs
+# ElevenLabs voice synthesis
 def generate_speech(text):
-    response = requests.post(
-        f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}",
-        headers={
-            "xi-api-key": ELEVENLABS_API_KEY,
-            "Content-Type": "application/json"
-        },
-        json={
-            "text": text,
-            "voice_settings": {"stability": 0.4, "similarity_boost": 0.7}
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
+    
+    headers = {
+        "xi-api-key": ELEVENLABS_API_KEY,
+        "Content-Type": "application/json"
+    }
+    
+    payload = {
+        "text": text,
+        "voice_settings": {
+            "stability": 0.4,
+            "similarity_boost": 0.7
         }
-    )
+    }
+
+    response = requests.post(url, headers=headers, json=payload)
+
+    if response.status_code != 200:
+        print("❌ ElevenLabs Error:", response.text)
+        return None
+
+    os.makedirs("static", exist_ok=True)
+
     with open("static/response.mp3", "wb") as f:
         f.write(response.content)
+
     return "/static/response.mp3"
 
-# Twilio voice endpoint
+# Twilio endpoint
 @app.route("/voice", methods=["POST"])
 def voice():
     reply = "Welcome to Fresh Fade Barbershop. How can I assist you today?"
     mp3_path = generate_speech(reply)
+
+    if not mp3_path:
+        return Response(
+            "<Response><Say>Sorry, there was a technical error. Goodbye.</Say></Response>",
+            mimetype="text/xml"
+        )
 
     response = f"""<?xml version="1.0" encoding="UTF-8"?>
     <Response>
