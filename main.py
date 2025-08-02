@@ -1,4 +1,4 @@
-from flask import Flask, Response
+from flask import Flask, request, Response
 
 app = Flask(__name__)
 
@@ -7,6 +7,7 @@ def voice():
     twiml = """<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Play>https://ai-barber-appointment-receptionist.onrender.com/static/test.mp3</Play>
+    <Record maxLength="10" action="/process_recording" playBeep="true" />
 </Response>
 """
     return Response(twiml, mimetype="text/xml")
