@@ -3,12 +3,10 @@ import sys
 from flask import Flask, request, Response
 import requests
 
-# Force logs to flush immediately in Render
-sys.stdout.reconfigure(line_buffering=True)
+sys.stdout.reconfigure(line_buffering=True)  # Flush logs immediately
 
 app = Flask(__name__)
 
-# ENV VARIABLES (make sure these are set in Render)
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY")
 ELEVENLABS_VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "EXAVITQu4vr4xnSDxMaL")
@@ -19,11 +17,16 @@ GREETING_MP3_URL = "https://ai-barber-appointment-receptionist.onrender.com/stat
 
 @app.route("/", methods=["GET"])
 def home():
+    print("Home page requested")
+    sys.stdout.flush()
     return "AI Barbershop with unlimited voice AI is online!"
 
 @app.route("/voice", methods=["POST"])
 def voice():
     ai_reply_url = request.form.get("ai_reply_url")
+    print("Voice endpoint hit; ai_reply_url:", ai_reply_url)
+    sys.stdout.flush()
+
     if ai_reply_url:
         twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -44,6 +47,10 @@ def voice():
 
 @app.route("/process_recording", methods=["POST"])
 def process_recording():
+    print("process_recording endpoint hit")
+    print("Request form data:", request.form)
+    sys.stdout.flush()
+
     recording_url = request.form.get("RecordingUrl")
     if not recording_url:
         print("No RecordingUrl found in request.")
@@ -53,6 +60,7 @@ def process_recording():
     audio_url = recording_url + ".wav"
     print("Downloading recording from:", audio_url)
     sys.stdout.flush()
+
     audio_data = requests.get(audio_url, auth=(TWILIO_SID, TWILIO_AUTH))
     if not audio_data.ok:
         print("Failed to download recording:", audio_data.text)
@@ -68,6 +76,8 @@ def process_recording():
     sys.stdout.flush()
 
     mp3_url = synthesize_elevenlabs(reply)
+    print("Synthesized speech URL:", mp3_url)
+    sys.stdout.flush()
 
     twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -79,6 +89,8 @@ def process_recording():
     return Response(twiml, mimetype="text/xml")
 
 def twiml_error(message):
+    print("Twiml error response:", message)
+    sys.stdout.flush()
     twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Say>{message}</Say>
