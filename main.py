@@ -4,12 +4,13 @@ import requests
 
 app = Flask(__name__)
 
-# Get your environment variables (make sure these are set in Render or .env)
+# ENV VARIABLES (add these in Render dashboard!)
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY")
 ELEVENLABS_VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "EXAVITQu4vr4xnSDxMaL")
+TWILIO_SID = os.environ.get("TWILIO_ACCOUNT_SID")
+TWILIO_AUTH = os.environ.get("TWILIO_AUTH_TOKEN")
 
-# URL for your greeting MP3 (should be accessible from the public internet)
 GREETING_MP3_URL = "https://ai-barber-appointment-receptionist.onrender.com/static/test.mp3"
 
 @app.route("/", methods=["GET"])
@@ -18,7 +19,6 @@ def home():
 
 @app.route("/voice", methods=["POST"])
 def voice():
-    # Initial greeting: play MP3, then record user
     twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
     <Response>
         <Play>{GREETING_MP3_URL}</Play>
@@ -35,10 +35,10 @@ def process_recording():
         print("No RecordingUrl found in request.")
         return twiml_error("Sorry, there was a problem recording your message.")
 
-    # 2. Download the audio file from Twilio (WAV by default)
+    # 2. Download the audio file from Twilio (WAV by default) - NEED AUTH!
     audio_url = recording_url + ".wav"
     print("Downloading recording from:", audio_url)
-    audio_data = requests.get(audio_url)
+    audio_data = requests.get(audio_url, auth=(TWILIO_SID, TWILIO_AUTH))
     if not audio_data.ok:
         print("Failed to download recording:", audio_data.text)
         return twiml_error("Sorry, there was a problem with your recording.")
@@ -85,6 +85,7 @@ def transcribe_audio(audio_bytes):
         files=files,
         data=data,
     )
+    print("Whisper response:", resp.text)
     if resp.ok and "text" in resp.json():
         return resp.json()["text"]
     else:
@@ -100,8 +101,10 @@ def chatgpt_reply(transcript):
     }
     data = {
         "model": "gpt-3.5-turbo",
-        "messages": [{"role": "system", "content": "You are an AI receptionist for a barbershop. Be helpful, friendly, and book appointments if asked."},
-                     {"role": "user", "content": transcript}]
+        "messages": [
+            {"role": "system", "content": "You are an AI receptionist for a barbershop. Be helpful, friendly, and book appointments if asked."},
+            {"role": "user", "content": transcript}
+        ]
     }
     response = requests.post(api_url, headers=headers, json=data)
     print("OpenAI response:", response.text)
