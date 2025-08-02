@@ -3,7 +3,8 @@ import sys
 from flask import Flask, request, Response
 import requests
 
-sys.stdout.reconfigure(line_buffering=True)  # Flush logs immediately
+# Make print statements flush immediately for Render logs
+sys.stdout.reconfigure(line_buffering=True)
 
 app = Flask(__name__)
 
@@ -57,7 +58,7 @@ def process_recording():
         sys.stdout.flush()
         return twiml_error("Sorry, there was a problem recording your message.")
 
-    audio_url = recording_url + ".wav"
+    audio_url = recording_url  # FIX: use the URL as is, no .wav appended
     print("Downloading recording from:", audio_url)
     sys.stdout.flush()
 
