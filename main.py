@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import time
 import datetime
 from flask import Flask, request, Response
 import requests
@@ -8,21 +9,21 @@ from dateutil import parser as dateparser
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
-# Immediate log flushing
+# Flush prints immediately for Render logs
 sys.stdout.reconfigure(line_buffering=True)
 
 app = Flask(__name__)
 
-# === CONFIG / ENV VARS ===
+# === CONFIG / ENV ===
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY")
 ELEVENLABS_VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "EXAVITQu4vr4xnSDxMaL")
 TWILIO_SID = os.environ.get("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH = os.environ.get("TWILIO_AUTH_TOKEN")
 GOOGLE_CALENDAR_ID = os.environ.get("GOOGLE_CALENDAR_ID")
-BASE_URL = os.environ.get("BASE_URL")  # optional override, e.g. https://your-app.onrender.com
+BASE_URL = os.environ.get("BASE_URL")  # e.g., https://your-app.onrender.com
 
-# Calendar service account JSON handling
+# Service account JSON file handling (writes from env if not present)
 SERVICE_ACCOUNT_FILENAME = "barber-shop-ai-booking-system-1daece25cca2.json"
 if not os.path.exists(SERVICE_ACCOUNT_FILENAME):
     sa_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
@@ -30,13 +31,13 @@ if not os.path.exists(SERVICE_ACCOUNT_FILENAME):
         with open(SERVICE_ACCOUNT_FILENAME, "w") as f:
             f.write(sa_json)
 
-# Timezone for event creation
-TIMEZONE = "Australia/Brisbane"  # adjust if needed
+# Timezone for calendar events
+TIMEZONE = "Australia/Brisbane"
 
-# Greeting audio (must exist in static)
+# Greeting audio file path (should exist under static/)
 GREETING_MP3_PATH = "/static/test.mp3"
 
-# In-memory context per call (lost on restart)
+# Simple in-memory per-call context (lost on restart)
 contexts: dict[str, dict] = {}
 
 # === HELPERS ===
@@ -44,8 +45,7 @@ contexts: dict[str, dict] = {}
 def get_base_url():
     if BASE_URL:
         return BASE_URL.rstrip("/")
-    # fallback from request if available
-    return request.url_root.strip("/")
+    return request.url_root.rstrip("/")
 
 def get_calendar_service():
     creds = service_account.Credentials.from_service_account_file(
@@ -56,11 +56,10 @@ def get_calendar_service():
     return service
 
 def is_slot_available(requested_dt: datetime.datetime, duration_minutes=60):
-    service = get_calendar_service()
-    # Google expects RFC3339 with timezone offset; convert to ISO with timezone
-    start = requested_dt.isoformat()
-    end = (requested_dt + datetime.timedelta(minutes=duration_minutes)).isoformat()
     try:
+        service = get_calendar_service()
+        start = requested_dt.isoformat()
+        end = (requested_dt + datetime.timedelta(minutes=duration_minutes)).isoformat()
         events_result = service.events().list(
             calendarId=GOOGLE_CALENDAR_ID,
             timeMin=start,
@@ -72,31 +71,34 @@ def is_slot_available(requested_dt: datetime.datetime, duration_minutes=60):
         return len(events) == 0
     except Exception as e:
         print("Calendar availability check error:", e)
-        return False  # assume not available on failure
+        return False
 
 def find_next_available(start_dt: datetime.datetime, duration_minutes=60, max_tries=8):
-    # Try advancing by slot increments (e.g., 30 mins) to find next open
     candidate = start_dt
-    for i in range(max_tries):
+    for _ in range(max_tries):
         if is_slot_available(candidate, duration_minutes):
             return candidate
         candidate += datetime.timedelta(minutes=30)
     return None
 
-def create_booking(name: str, description: str, start_dt: datetime.datetime, duration_minutes=60):
-    service = get_calendar_service()
-    event = {
-        "summary": f"Haircut - {name}",
-        "description": description,
-        "start": {"dateTime": start_dt.isoformat(), "timeZone": TIMEZONE},
-        "end": {"dateTime": (start_dt + datetime.timedelta(minutes=duration_minutes)).isoformat(), "timeZone": TIMEZONE},
-    }
-    created = service.events().insert(calendarId=GOOGLE_CALENDAR_ID, body=event).execute()
-    return created.get("htmlLink")
+def create_booking(name: str, service_desc: str, start_dt: datetime.datetime, duration_minutes=60):
+    try:
+        service = get_calendar_service()
+        event = {
+            "summary": f"{service_desc} - {name}",
+            "description": f"{service_desc} booked by {name}",
+            "start": {"dateTime": start_dt.isoformat(), "timeZone": TIMEZONE},
+            "end": {"dateTime": (start_dt + datetime.timedelta(minutes=duration_minutes)).isoformat(), "timeZone": TIMEZONE},
+        }
+        created = service.events().insert(calendarId=GOOGLE_CALENDAR_ID, body=event).execute()
+        return created.get("htmlLink")
+    except Exception as e:
+        print("Error creating booking:", e)
+        return None
 
 def transcribe_audio(audio_bytes):
     if not OPENAI_API_KEY:
-        print("Missing OpenAI API key for transcription.")
+        print("Missing OpenAI API key.")
         return "Sorry, I can't access the AI right now."
     files = {'file': ('audio.wav', audio_bytes, 'audio/wav')}
     headers = {"Authorization": f"Bearer {OPENAI_API_KEY}"}
@@ -111,25 +113,20 @@ def transcribe_audio(audio_bytes):
         )
         print("Whisper response:", resp.text)
         sys.stdout.flush()
-        json_data = resp.json()
-        if resp.ok and "text" in json_data:
-            return json_data["text"]
+        resp_json = resp.json()
+        if resp.ok and "text" in resp_json:
+            return resp_json["text"]
         else:
-            print("Whisper API error:", json_data)
-            return "Sorry, I couldn't understand the recording."
+            print("Whisper transcription error:", resp_json)
+            return ""
     except Exception as e:
         print("Exception during transcription:", e)
-        return "Sorry, I couldn't process your voice right now."
+        return ""
 
 def chatgpt_parse_and_respond(call_sid: str, user_message: str):
-    """
-    Maintains context and asks ChatGPT for next action.
-    Expects structured JSON reply from the model describing intent / slots and reply_text.
-    """
     if not OPENAI_API_KEY:
-        return "Sorry, AI is not configured.", {}
-
-    # Retrieve or initialize context
+        return "Sorry, AI not configured.", {}
+    # maintain context
     ctx = contexts.setdefault(call_sid, {
         "name": None,
         "requested_datetime": None,
@@ -140,37 +137,30 @@ def chatgpt_parse_and_respond(call_sid: str, user_message: str):
     })
 
     system_prompt = (
-        "You are a smart barbershop receptionist. Keep the conversation natural, "
-        "and help callers book haircuts. "
-        "Track these slots: name, desired date/time, service. "
-        "If the caller expresses intent to book, ask missing pieces one at a time. "
-        "After you have name, datetime, and service, check availability is done by the backend. "
-        "If the slot is busy, propose the next available slot if provided by backend. "
-        "Only when the user explicitly confirms the booking, respond with a field booking_confirmed true. "
-        "Output a JSON object with these keys: "
-        "\"reply_text\" (what to say), "
-        "\"name\" (if provided or known), "
-        "\"requested_datetime\" (ISO 8601 if user gave a date/time, else null), "
-        "\"service\" (if provided), "
-        "\"need_confirmation\" (true if you need the user to confirm a booking), "
-        "\"booking_intent\" (true if user wants to book), "
-        "\"booking_confirmed\" (true if user said confirm), "
-        "\"ask_for\" (one of 'name','datetime','service','confirmation', or null). "
-        "Keep reply_text concise and friendly."
+        "You are a professional barbershop receptionist. "
+        "Help the caller book appointments by gathering name, service, and desired date/time. "
+        "If they request a booking, ask for missing pieces one at a time. "
+        "Once you have name, service, and datetime, wait for explicit confirmation before booking. "
+        "If a slot is unavailable, you will be told by the backend and should suggest alternatives. "
+        "Provide output as a JSON object with keys: "
+        "\"reply_text\", \"name\" (if given), \"service\" (if given), "
+        "\"requested_datetime\" (ISO string if given), \"booking_intent\" (bool), "
+        "\"need_confirmation\" (bool), \"booking_confirmed\" (bool), "
+        "\"ask_for\" (one of 'name','service','datetime','confirmation', or null)."
     )
 
     messages = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_message},
+        {"role": "user", "content": user_message}
     ]
 
-    # Provide current known context to model so it doesn't forget
+    # expose existing context so model can incorporate
     if ctx["name"]:
-        messages.append({"role": "user", "content": f"Current name on file: {ctx['name']}"})
-    if ctx["requested_datetime"]:
-        messages.append({"role": "user", "content": f"Current requested datetime on file: {ctx['requested_datetime']}"})
+        messages.append({"role": "user", "content": f"Name on file: {ctx['name']}"})
     if ctx["service"]:
-        messages.append({"role": "user", "content": f"Current service on file: {ctx['service']}"})
+        messages.append({"role": "user", "content": f"Service on file: {ctx['service']}"})
+    if ctx["requested_datetime"]:
+        messages.append({"role": "user", "content": f"Requested datetime on file: {ctx['requested_datetime']}"})
 
     payload = {
         "model": "gpt-3.5-turbo",
@@ -180,58 +170,52 @@ def chatgpt_parse_and_respond(call_sid: str, user_message: str):
     }
 
     try:
-        resp = requests.post(
+        response = requests.post(
             "https://api.openai.com/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {OPENAI_API_KEY}",
-                "Content-Type": "application/json"
-            },
+            headers={"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"},
             json=payload,
             timeout=30
         )
-        print("ChatGPT raw response:", resp.text)
+        print("ChatGPT raw response:", response.text)
         sys.stdout.flush()
-        data = resp.json()
+        data = response.json()
         if "choices" in data and len(data["choices"]) > 0:
             content = data["choices"][0]["message"]["content"].strip()
-            # Expecting JSON object; try to parse
             try:
                 parsed = json.loads(content)
             except json.JSONDecodeError:
-                # Fallback: wrap in minimal reply
-                print("Failed to parse JSON from ChatGPT reply. Falling back. Content:", content)
+                # fallback simple structure
                 parsed = {
                     "reply_text": content,
                     "name": ctx["name"],
-                    "requested_datetime": ctx["requested_datetime"],
                     "service": ctx["service"],
-                    "need_confirmation": False,
+                    "requested_datetime": ctx["requested_datetime"],
                     "booking_intent": False,
+                    "need_confirmation": False,
                     "booking_confirmed": False,
                     "ask_for": None
                 }
-            # Update context with any provided slots
+            # update context
             if parsed.get("name"):
                 ctx["name"] = parsed["name"]
+            if parsed.get("service"):
+                ctx["service"] = parsed["service"]
             if parsed.get("requested_datetime"):
-                # normalize/validate datetime
+                # normalize
                 try:
                     dt = dateparser.parse(parsed["requested_datetime"])
                     ctx["requested_datetime"] = dt.isoformat()
                 except Exception:
                     pass
-            if parsed.get("service"):
-                ctx["service"] = parsed["service"]
             if parsed.get("booking_confirmed"):
                 ctx["booking_confirmed"] = True
             if parsed.get("need_confirmation"):
                 ctx["awaiting_confirmation"] = True
-
             ctx["last_reply"] = parsed.get("reply_text")
             return parsed.get("reply_text", ""), parsed
         else:
-            print("ChatGPT missing choices or unexpected structure:", data)
-            return "Sorry, I had trouble thinking right now.", {}
+            print("Unexpected ChatGPT structure:", data)
+            return "Sorry, I had trouble responding.", {}
     except Exception as e:
         print("ChatGPT exception:", e)
         return "Sorry, the AI service is unavailable right now.", {}
@@ -239,7 +223,6 @@ def chatgpt_parse_and_respond(call_sid: str, user_message: str):
 def synthesize_elevenlabs(text: str) -> str:
     if not ELEVENLABS_API_KEY:
         print("Missing ElevenLabs API key.")
-        sys.stdout.flush()
         return f"{get_base_url()}{GREETING_MP3_PATH}"
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
     headers = {
@@ -256,16 +239,38 @@ def synthesize_elevenlabs(text: str) -> str:
             reply_path = "static/ai_reply.mp3"
             with open(reply_path, "wb") as f:
                 f.write(response.content)
-            final_url = f"{get_base_url()}/static/ai_reply.mp3"
-            return final_url
+            return f"{get_base_url()}/static/ai_reply.mp3"
         else:
             print("ElevenLabs error:", response.text)
             return f"{get_base_url()}{GREETING_MP3_PATH}"
     except Exception as e:
-        print("Exception during ElevenLabs call:", e)
+        print("Exception in ElevenLabs:", e)
         return f"{get_base_url()}{GREETING_MP3_PATH}"
 
+def fetch_recording_bytes(recording_url):
+    candidates = [recording_url + ".wav", recording_url + ".mp3", recording_url]
+    for attempt in range(3):
+        for url_try in candidates:
+            try:
+                print(f"[fetch_recording_bytes] Attempt {attempt+1} checking {url_try}")
+                sys.stdout.flush()
+                resp = requests.get(url_try, auth=(TWILIO_SID, TWILIO_AUTH), timeout=10)
+                if resp.ok:
+                    print(f"[fetch_recording_bytes] Success from {url_try}")
+                    sys.stdout.flush()
+                    return resp.content
+                else:
+                    print(f"[fetch_recording_bytes] Failed {url_try}: {resp.status_code}")
+                    sys.stdout.flush()
+            except Exception as e:
+                print(f"[fetch_recording_bytes] Exception for {url_try}: {e}")
+                sys.stdout.flush()
+        time.sleep(1)
+    return None
+
 def twiml_error(message: str):
+    print("Sending error to caller:", message)
+    sys.stdout.flush()
     twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Say>{message}</Say>
@@ -278,9 +283,9 @@ def twiml_error(message: str):
 
 @app.route("/", methods=["GET"])
 def home():
-    print("Health check / home called")
+    print("Health check / home")
     sys.stdout.flush()
-    return "AI Barbershop receptionist is online."
+    return "AI Barbershop receptionist is live."
 
 @app.route("/voice", methods=["POST"])
 def voice():
@@ -289,7 +294,7 @@ def voice():
     sys.stdout.flush()
 
     if ai_reply_url:
-        # play last AI reply then record next utterance
+        # play last AI reply then record again
         twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Play>{ai_reply_url}</Play>
@@ -297,12 +302,11 @@ def voice():
 </Response>
 """
     else:
-        # initial greeting
         greeting_url = f"{get_base_url()}{GREETING_MP3_PATH}"
         twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Play>{greeting_url}</Play>
-    <Say voice="alice">Welcome to Fresh Fade Barbershop. How can I help you today?</Say>
+    <Say>Welcome to Fresh Fade Barbershop. How can I help you today?</Say>
     <Record maxLength="15" action="/process_recording" playBeep="true" timeout="5" />
 </Response>
 """
@@ -310,36 +314,32 @@ def voice():
 
 @app.route("/process_recording", methods=["POST"])
 def process_recording():
-    print("process_recording invoked; form data:", request.form)
+    print("process_recording invoked; form:", request.form)
     sys.stdout.flush()
 
-    call_sid = request.form.get("CallSid") or request.form.get("CallSid", "")
+    call_sid = request.form.get("CallSid", "")
     recording_url = request.form.get("RecordingUrl")
     if not recording_url:
         return twiml_error("I didn't get your voice. Please try again.")
 
-    # Download Twilio recording (no .wav append)
-    print("Downloading recording from:", recording_url)
-    sys.stdout.flush()
-    audio_resp = requests.get(recording_url, auth=(TWILIO_SID, TWILIO_AUTH))
-    if not audio_resp.ok:
-        print("Failed to fetch recording:", audio_resp.text)
-        sys.stdout.flush()
+    # fetch audio (with retries / extension fallbacks)
+    audio_bytes = fetch_recording_bytes(recording_url)
+    if not audio_bytes:
         return twiml_error("Sorry, I couldn't retrieve your message.")
 
-    # Transcribe
-    transcript = transcribe_audio(audio_resp.content)
-    print("Transcribed user:", transcript)
+    # transcription
+    transcript = transcribe_audio(audio_bytes)
+    print("Transcript:", transcript)
     sys.stdout.flush()
 
-    # Use ChatGPT to decide next step and get structured reply
+    # ChatGPT parsing & decision
     reply_text, parsed = chatgpt_parse_and_respond(call_sid, transcript)
 
-    # Booking logic injection if intent present
+    # booking logic
     ctx = contexts.get(call_sid, {})
     booking_link = None
     if parsed.get("booking_intent"):
-        # If user provided a datetime string
+        # parse requested datetime from context
         requested_iso = ctx.get("requested_datetime")
         requested_dt = None
         if requested_iso:
@@ -348,28 +348,27 @@ def process_recording():
             except Exception:
                 requested_dt = None
 
-        # If we have a datetime and not yet confirmed
         if requested_dt and not ctx.get("booking_confirmed"):
             available = is_slot_available(requested_dt)
             if available:
-                # Ask confirmation if not yet asked
                 if not ctx.get("awaiting_confirmation"):
-                    reply_text = f"Got it. I can book you for {requested_dt.strftime('%A %I:%M %p')}. Should I confirm this appointment?"
+                    reply_text = f"Great, I can book you for {requested_dt.strftime('%A %I:%M %p')}. Should I confirm this appointment?"
                     ctx["awaiting_confirmation"] = True
                 else:
-                    # If user confirmed (booking_confirmed was set by GPT), create booking
                     if ctx.get("booking_confirmed"):
                         name = ctx.get("name") or "Client"
                         service = ctx.get("service") or "Haircut"
                         booking_link = create_booking(name, service, requested_dt)
-                        reply_text = (
-                            f"Booking confirmed for {requested_dt.strftime('%A %I:%M %p')} under {name}. "
-                            f"I've added it to the calendar. Here is the confirmation link: {booking_link}."
-                        )
+                        if booking_link:
+                            reply_text = (
+                                f"Booking confirmed for {requested_dt.strftime('%A %I:%M %p')} under {name}. "
+                                f"I've added it to the calendar."
+                            )
+                        else:
+                            reply_text = "I tried to book it but something went wrong. Please try again."
                         ctx["awaiting_confirmation"] = False
             else:
-                # Slot taken; suggest next
-                next_slot = find_next_available(requested_dt)
+                next_slot = find_next_available(requested_dt) if requested_dt else None
                 if next_slot:
                     reply_text = (
                         f"Sorry, {requested_dt.strftime('%A %I:%M %p')} is taken. "
@@ -379,12 +378,12 @@ def process_recording():
                 else:
                     reply_text = "Sorry, I can't find a nearby available slot. Could you try another time?"
 
-    # Synthesize speech
+    # synthesize reply
     mp3_url = synthesize_elevenlabs(reply_text or "Sorry, I didn't understand that.")
-    print("Responding with:", reply_text, "audio:", mp3_url)
+    print("Replying with:", reply_text, "audio:", mp3_url)
     sys.stdout.flush()
 
-    # Loop back for unlimited conversation
+    # loop back for next turn
     twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Play>{mp3_url}</Play>
@@ -393,14 +392,13 @@ def process_recording():
 """
     return Response(twiml, mimetype="text/xml")
 
-# === Optional test route for calendar access ===
 @app.route("/test_calendar", methods=["GET"])
 def test_calendar():
     try:
         service = get_calendar_service()
         events = service.events().list(
             calendarId=GOOGLE_CALENDAR_ID,
-            maxResults=3,
+            maxResults=5,
             singleEvents=True,
             orderBy="startTime"
         ).execute()
@@ -410,7 +408,7 @@ def test_calendar():
     except Exception as e:
         return {"status": "error", "error": str(e)}
 
-# === ENTRY POINT ===
+# === ENTRY ===
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
