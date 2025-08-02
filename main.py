@@ -4,7 +4,6 @@ app = Flask(__name__)
 
 @app.route("/voice", methods=["POST"])
 def voice():
-    # TwiML for Twilio - must be Content-Type: text/xml
     twiml = """<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Play>https://ai-barber-appointment-receptionist.onrender.com/static/test.mp3</Play>
